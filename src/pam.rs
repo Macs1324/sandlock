@@ -8,6 +8,7 @@ use std::ptr;
 
 const PAM_SUCCESS: c_int = 0;
 const PAM_BUF_ERR: c_int = 5;
+const PAM_NEW_AUTHTOK_REQD: c_int = 12;
 const PAM_CONV_ERR: c_int = 19;
 const PAM_PROMPT_ECHO_OFF: c_int = 1;
 const PAM_PROMPT_ECHO_ON: c_int = 2;
@@ -134,7 +135,10 @@ unsafe fn start(service: &CStr, user: &CStr, conv: &PamConv, handle: &mut *mut c
 pub(crate) fn authenticate(service: &str, password: &[u8]) -> anyhow::Result<bool> {
     let service = CString::new(service)?;
     let user = current_user()?;
-    let mut secret = password.to_vec();
+    // Room for the NUL up front: growing would leave a copy behind in freed
+    // memory.
+    let mut secret = Vec::with_capacity(password.len() + 1);
+    secret.extend_from_slice(password);
     secret.push(0);
     let conv = PamConv {
         conv: conversation,
@@ -152,6 +156,12 @@ pub(crate) fn authenticate(service: &str, password: &[u8]) -> anyhow::Result<boo
         let mut status = pam_authenticate(handle, 0);
         if status == PAM_SUCCESS {
             status = pam_acct_mgmt(handle, 0);
+            // An expired password still proves who is there; a locker can't
+            // change it, and refusing would lock the user out of the session.
+            if status == PAM_NEW_AUTHTOK_REQD {
+                log::warn!("the password has expired; unlocking anyway");
+                status = PAM_SUCCESS;
+            }
         }
         if status != PAM_SUCCESS {
             let why = CStr::from_ptr(pam_strerror(handle, status)).to_string_lossy();
