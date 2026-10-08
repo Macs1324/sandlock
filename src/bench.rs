@@ -457,7 +457,9 @@ fn measure(owner: &[u32], canvas: [u32; 2], images: &[Image], places: &[Place]) 
     let placed = owner.iter().filter(|&&o| o != 0).count() as u64;
     Measure {
         offscreen: (placed - filled) as f32 / pixels.max(1) as f32,
-        hidden: (pixels - placed) as f32 / pixels.max(1) as f32,
+        // Strict placement fills the offscreen canvas too: more placed than
+        // output pixels.
+        hidden: pixels.saturating_sub(placed) as f32 / pixels.max(1) as f32,
         holes: 1.0 - filled as f32 / pixels.max(1) as f32,
         home: home as f32 / filled.max(1) as f32,
         clear: clear as f32 / filled.max(1) as f32,
