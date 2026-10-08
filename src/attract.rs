@@ -629,6 +629,10 @@ impl Life {
             let (cx, cy) = ((i % self.cells[0]) as u32, (i / self.cells[0]) as u32);
             let x0 = self.margin[0] + cx * self.cell + gap / 2;
             let y0 = self.margin[1] + cy * self.cell + gap / 2;
+            // A board too small for its minimum of 3 cells cuts some off.
+            if x0 >= w || y0 >= h {
+                continue;
+            }
             for y in y0..(y0 + self.cell - gap).min(h) {
                 let row = ((y * w + x0) * 4) as usize;
                 let len = (self.cell - gap).min(w - x0) as usize;
@@ -801,6 +805,16 @@ mod tests {
         assert_eq!(at(15, 5), 255, "inside the cell");
         assert_eq!(at(5, 5), 0, "a dead cell");
         assert_eq!(at(10, 5), 0, "the gap");
+    }
+
+    /// A board narrower than its 3 cells paints the ones that fit.
+    #[test]
+    fn life_clips_cells_off_a_tiny_board() {
+        let mut l = life([3, 3], &[(0, 0), (2, 0), (2, 2)]);
+        l.size = [15, 12];
+        let px = l.render();
+        assert_eq!(px.len(), 15 * 12 * 4);
+        assert_eq!(px[((5 * 15 + 5) * 4) as usize], 255, "the cell that fits");
     }
 
     #[test]
