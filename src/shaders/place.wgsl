@@ -1,7 +1,8 @@
 // Strict placement for the recompose on unlock: while grains fly home, every
-// canvas pixel holds exactly one grain (`owner`, grain + 1) and every grain
-// exactly one pixel. There are as many grains as pixels, so the screen is
-// always fully covered: no gaps, no grain hidden under another.
+// canvas pixel holds at most one grain (`owner`, grain + 1) and every grain
+// at most one pixel, and every pixel holds a grain or borders one, which
+// compose (render.wgsl) blends over it: the screen is always fully covered,
+// with no gaps.
 //
 // Every step, from where the grains are now:
 //
@@ -9,7 +10,12 @@
 //           keeps it, so everything visible stays exactly where it is;
 //   claim:  each grain hidden under another takes a free pixel near it, in
 //           rounds of growing radius (nearest first, across all grains);
-//   rest:   the very few still without one take whatever pixels are left.
+//   rest:   pixels still free with no grain beside them, inside the gaps
+//           crowding left, take the grains still without one, from
+//           wherever they are. The other free pixels stay free: late in
+//           the recompose they are scattered singles, and filling them with
+//           grains from far away speckled the settling picture with
+//           foreign colours; their neighbours blend over them instead.
 //
 // (The claim rounds run over a list of the grains without a pixel, which a
 // pass gathers once, sized for an indirect dispatch: a thread per grain in
@@ -142,18 +148,35 @@ fn size_claims() {
     claim_groups[2] = 1u;
 }
 
-// Lists the pixels still free...
+// Whether a pixel next to `p` holds a grain, which compose spreads over `p`.
+fn beside_grain(p: u32) -> bool {
+    let w = i32(width());
+    let at = vec2<i32>(i32(p % width()), i32(p / width()));
+    for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+            let q = at + vec2<i32>(dx, dy);
+            if ((dx != 0 || dy != 0) && q.x >= 0 && q.y >= 0 && q.x < w && q.y < i32(P.canvas.y)
+                && atomicLoad(&owner[u32(q.y * w + q.x)]) != 0u) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Lists the pixels still free with no grain beside them...
 @compute @workgroup_size(256)
 fn holes(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>,
          @builtin(local_invocation_index) t: u32) {
     let p = grain_index(gid, nw);
-    let free = p < pixels() && atomicLoad(&owner[p]) == 0u;
+    let free = p < pixels() && atomicLoad(&owner[p]) == 0u && !beside_grain(p);
     let k = reserve(free, t, 0u);
     if (free) { list[k] = p; }
 }
 
-// ... and every grain still without one takes the next. There are exactly as
-// many of each: every pixel without a grain is a grain without a pixel.
+// ... and grains still without a pixel take them, as far as they go. There
+// are at most as many: every pixel without a grain is a grain without a
+// pixel. Grains left over stay hidden this step.
 @compute @workgroup_size(256)
 fn rest(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(num_workgroups) nw: vec3<u32>,
         @builtin(local_invocation_index) t: u32) {

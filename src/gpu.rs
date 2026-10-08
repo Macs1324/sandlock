@@ -54,8 +54,8 @@ pub(crate) struct Params {
     /// must be exactly home.
     pub(crate) homing_t: f32,
     pub(crate) homing_done: f32,
-    /// 1 while placement is strict (shaders/place.wgsl): `owner` holds every
-    /// grain on a pixel of its own.
+    /// 1 while placement is strict (shaders/place.wgsl): `owner` holds each
+    /// grain shown on a pixel of its own.
     pub(crate) placed: u32,
     /// Quiet zones: noise threshold, size (px), noise time, strength (0 = off).
     pub(crate) quiet: [f32; 4],
@@ -440,8 +440,8 @@ struct RoundUniform {
 const CLAIM_RADII: [f32; 7] = [1.5, 3.0, 6.0, 12.0, 24.0, 48.0, 96.0];
 
 /// Strict placement for the recompose (shaders/place.wgsl): while grains fly
-/// home, every pixel holds exactly one grain, so nothing overlaps and nothing
-/// shows black.
+/// home, every pixel holds at most one grain and holds or borders one, so
+/// nothing overlaps and nothing shows black.
 struct Placement {
     keep: Pass,
     gather: Pass,
@@ -1330,9 +1330,10 @@ impl Sim {
         gpu.queue.submit([encoder.finish()]);
     }
 
-    /// Gives every grain a pixel of its own: where it is if it is drawn
-    /// there, else the nearest free one; once every grain is due home exactly
-    /// (grains.wgsl), every pixel gets its own grain back.
+    /// Gives grains pixels of their own: where it is if it is drawn there,
+    /// else the nearest free one, until no pixel is left without a grain on
+    /// or beside it; once every grain is due home exactly (grains.wgsl),
+    /// every pixel gets its own grain back.
     fn place(&self, encoder: &mut wgpu::CommandEncoder) {
         let Some(pl) = &self.placement else { return };
         let [w, h] = self.canvas;
