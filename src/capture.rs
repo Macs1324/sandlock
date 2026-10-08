@@ -126,9 +126,12 @@ impl Capture {
             return self.fail("ready before copy");
         };
         let (width, height, stride) = (*width, *height, *stride as usize);
-        let swap_rb = match format {
-            wl_shm::Format::Argb8888 | wl_shm::Format::Xrgb8888 => false,
-            wl_shm::Format::Abgr8888 | wl_shm::Format::Xbgr8888 => true,
+        let (swap_rb, ten_bit) = match format {
+            wl_shm::Format::Argb8888 | wl_shm::Format::Xrgb8888 => (false, false),
+            wl_shm::Format::Abgr8888 | wl_shm::Format::Xbgr8888 => (true, false),
+            // 10-bit outputs, offered as is by wlroots compositors.
+            wl_shm::Format::Argb2101010 | wl_shm::Format::Xrgb2101010 => (false, true),
+            wl_shm::Format::Abgr2101010 | wl_shm::Format::Xbgr2101010 => (true, true),
             other => {
                 let why = format!("unsupported format {other:?}");
                 return self.fail(&why);
@@ -146,6 +149,9 @@ impl Capture {
             let line = &src[from * stride..from * stride + row];
             let out = &mut bgra[y * row..(y + 1) * row];
             out.copy_from_slice(line);
+            if ten_bit {
+                out.as_chunks_mut::<4>().0.iter_mut().for_each(|px| *px = from_2101010(*px));
+            }
             if swap_rb {
                 out.as_chunks_mut::<4>().0.iter_mut().for_each(|px| px.swap(0, 2));
             }
@@ -158,6 +164,13 @@ impl Capture {
             bgra,
         }));
     }
+}
+
+/// A little-endian 2:10:10:10 pixel (blue, or red, in the low bits) as 8-bit
+/// channels in the same order: the top 8 bits of each, opaque.
+fn from_2101010(px: [u8; 4]) -> [u8; 4] {
+    let v = u32::from_le_bytes(px);
+    [(v >> 2) as u8, (v >> 12) as u8, (v >> 22) as u8, 255]
 }
 
 /// Implemented by the app state: gives the frame handler access to the
@@ -213,5 +226,17 @@ where
             Event::Failed => capture.fail("compositor reported failure"),
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::from_2101010;
+
+    #[test]
+    fn ten_bit_pixels_keep_their_top_bits() {
+        // x=0, first channel 1023, second 512, third 3 (low bits first).
+        let v: u32 = 1023 | (512 << 10) | (3 << 20);
+        assert_eq!(from_2101010(v.to_le_bytes()), [255, 128, 0, 255]);
     }
 }
