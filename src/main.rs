@@ -311,7 +311,7 @@ fn main() -> anyhow::Result<()> {
 
     // GPU setup before locking, so the first locked frame is ready at once.
     let gpu = Gpu::new(false)?;
-    let mut sim = Sim::new(&gpu, canvas, &places, &images)?;
+    let mut sim = gpu.checked(|| Sim::new(&gpu, canvas, &places, &images))?;
 
     let primary = (0..places.len())
         .max_by_key(|&i| places[i].size[0] as u64 * places[i].size[1] as u64)
@@ -346,7 +346,7 @@ fn main() -> anyhow::Result<()> {
     // The password dots are an attractor too, on the primary output.
     let (row, width, radius) = storm.dots_row();
     let dots = attract::Dots::new(row, width, radius, canvas, named[primary].levels);
-    let mut live = attract::install(&config.attractors, &named, primary, dots, &gpu, &mut sim);
+    let mut live = gpu.checked(|| Ok(attract::install(&config.attractors, &named, primary, dots, &gpu, &mut sim)))?;
     drop(images);
 
     // Lock (or open the preview overlays) and wait for every surface.
@@ -357,6 +357,11 @@ fn main() -> anyhow::Result<()> {
             app.screens.push(screen);
         }
     } else {
+        // `-f`'s parent has given up by now and the caller's fallback is
+        // locking: don't race it.
+        if lock_mode && Instant::now() >= deadline {
+            bail!("not ready to lock within {:?}", daemon::LOCK_TIMEOUT);
+        }
         let lock = app
             .lock_state
             .lock(&qh)

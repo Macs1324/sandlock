@@ -158,6 +158,22 @@ impl Gpu {
         })
     }
 
+    /// Runs `f`, failing if the GPU reported running out of memory or a
+    /// validation error meanwhile (normally only logged, see `new`): for
+    /// setup, which had better fail before locking than leave a lock that
+    /// shows nothing.
+    pub(crate) fn checked<T>(&self, f: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
+        let oom = self.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+        let invalid = self.device.push_error_scope(wgpu::ErrorFilter::Validation);
+        let result = f();
+        let invalid = pollster::block_on(invalid.pop());
+        let oom = pollster::block_on(oom.pop());
+        if let Some(e) = oom.or(invalid) {
+            anyhow::bail!("GPU: {e}");
+        }
+        result
+    }
+
     /// # Safety
     /// `display` and `surface` must be live Wayland objects that outlive the
     /// returned surface.
