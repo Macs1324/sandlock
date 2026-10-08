@@ -132,6 +132,10 @@ How the sand moves. 0 turns an ingredient off; values above 1 are allowed.
 | `quiet_drift` | 4.0     | seconds for the quiet zones to change completely      |
 | `quiet_calm`  | 0.175   | 0..1: how clearly the desktop shows through them      |
 
+The lock screen is made of your desktop, so whatever was on screen when it
+locked stays partly visible to anyone passing by: scrambled in the storm,
+blurred in the quiet zones. `quiet = 0` turns the quiet zones off.
+
 ### `[display]`
 
 | key          | default | what it does                                  |
