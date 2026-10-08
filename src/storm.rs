@@ -43,21 +43,23 @@ pub(crate) const HOMING_DONE: f32 = 1.4;
 pub(crate) enum Phase {
     Storm,
     Checking,
-    Homing { since: f32 },
+    Homing { since: f64 },
 }
 
 pub(crate) struct Dot {
     at: [f32; 2],
-    born: f32,
+    born: f64,
 }
 
 pub(crate) struct Storm {
     tuning: config::Storm,
     rng: Rng,
-    pub(crate) time: f32,
+    /// Seconds since the lock started. f64: an f32 stops advancing by a
+    /// 60 fps step after 2^19 s (about 6 days), which would freeze homing.
+    pub(crate) time: f64,
     pub(crate) phase: Phase,
     entropy: f32,
-    next_gust: f32,
+    next_gust: f64,
     canvas: [f32; 2],
     /// Fluid cell size in px (x, y).
     cell: [f32; 2],
@@ -70,14 +72,14 @@ pub(crate) struct Storm {
     undotted: usize,
     pending: Vec<Splat>,
     /// Splats that go off later (the eruption's shockwave).
-    scheduled: Vec<(f32, Splat)>,
+    scheduled: Vec<(f64, Splat)>,
     /// Release every grain bound to an attractor on the next step.
     shatter: bool,
     /// Latest pointer position (canvas px), and where it was at the last step.
     pointer: Option<[f32; 2]>,
     pointer_prev: Option<[f32; 2]>,
     /// Shake of the dots after a wrong password: (start time).
-    shake: Option<f32>,
+    shake: Option<f64>,
     /// Quiet-zone noise level above which a home is (starting to be) quiet.
     quiet_threshold: f32,
 }
@@ -98,7 +100,7 @@ impl Storm {
             time: 0.0,
             phase: Phase::Storm,
             entropy: 0.0,
-            next_gust: RELEASE_DELAY,
+            next_gust: f64::from(RELEASE_DELAY),
             canvas,
             cell,
             anchor: [o[0] + s[0] * 0.5, o[1] + s[1] * 0.78],
@@ -195,7 +197,7 @@ impl Storm {
         const RINGS: [(f32, usize, f32, f32); 4] =
             [(6.0, 8, 450.0, 4.0), (13.0, 12, 420.0, 6.0), (21.0, 14, 380.0, 8.0), (30.0, 16, 320.0, 10.0)];
         for (ring, &(r, n, spin, size)) in RINGS.iter().enumerate() {
-            let at_time = self.time + ring as f32 * 0.1;
+            let at_time = self.time + ring as f64 * 0.1;
             let twist = self.rng.range(0.0, std::f32::consts::TAU);
             for k in 0..n {
                 let angle = twist + k as f32 / n as f32 * std::f32::consts::TAU + self.rng.range(-0.15, 0.15);
@@ -265,7 +267,7 @@ impl Storm {
         [
             self.quiet_threshold,
             t.quiet_size.max(1.0) * unit,
-            self.time / t.quiet_drift.max(0.1),
+            (self.time / f64::from(t.quiet_drift.max(0.1))) as f32,
             calm * t.quiet_calm.clamp(0.0, 1.0),
         ]
     }
@@ -278,14 +280,14 @@ impl Storm {
     /// Seconds since the grains started flying home, if they have.
     pub(crate) fn homing_for(&self) -> Option<f32> {
         match self.phase {
-            Phase::Homing { since } => Some(self.time - since),
+            Phase::Homing { since } => Some((self.time - since) as f32),
             _ => None,
         }
     }
 
     /// Advances by `dt`, filling `params` and returning this step's splats.
     pub(crate) fn step(&mut self, dt: f32, params: &mut Params) -> Vec<Splat> {
-        self.time += dt;
+        self.time += f64::from(dt);
         let homing = self.homing_for().map(|t| (t / HOMING_RAMP).min(1.0));
         let mut splats = std::mem::take(&mut self.pending);
         if homing.is_none() {
@@ -300,7 +302,7 @@ impl Storm {
         });
 
         let t = self.tuning;
-        if homing.is_none() && self.time >= RELEASE_DELAY && t.gusts > 0.0 {
+        if homing.is_none() && self.time >= f64::from(RELEASE_DELAY) && t.gusts > 0.0 {
             // Gusts: sudden bursts on top of the wind, more frequent with
             // `gusts` and after a wrong password, stronger with `intensity`.
             while self.time >= self.next_gust {
@@ -323,16 +325,16 @@ impl Storm {
                         radius: self.rng.range(4.0, 9.0),
                     });
                 }
-                self.next_gust += self.rng.range(0.12, 0.35) / ((1.0 + self.entropy) * t.gusts);
+                self.next_gust += f64::from(self.rng.range(0.12, 0.35) / ((1.0 + self.entropy) * t.gusts));
             }
         }
         self.entropy *= (-dt / 8.0).exp();
-        if self.shake.is_some_and(|t| self.time - t >= SHAKE) {
+        if self.shake.is_some_and(|t| self.time - t >= f64::from(SHAKE)) {
             self.shake = None;
             self.cleared();
         }
 
-        params.time = self.time;
+        params.time = self.time as f32;
         params.release_start = RELEASE_DELAY;
         params.homing = homing.unwrap_or(0.0);
         params.homing_t = self.homing_for().unwrap_or(0.0);
@@ -355,20 +357,20 @@ impl Storm {
     /// shake applied.
     pub(crate) fn dots(&self) -> Vec<[f32; 3]> {
         let pulse = if self.phase == Phase::Checking {
-            0.55 + 0.45 * (self.time * 7.0).cos()
+            0.55 + 0.45 * (self.time * 7.0).cos() as f32
         } else {
             1.0
         };
         let shake = self
             .shake
-            .map(|t| self.time - t)
+            .map(|t| (self.time - t) as f32)
             .filter(|t| *t < SHAKE)
             .map(|t| (t * 60.0).sin() * (1.0 - t / SHAKE) * self.spacing * 0.6)
             .unwrap_or(0.0);
         self.dots
             .iter()
             .map(|d| {
-                let pop = ((self.time - d.born) / 0.12).clamp(0.0, 1.0);
+                let pop = (((self.time - d.born) / 0.12) as f32).clamp(0.0, 1.0);
                 [d.at[0] + shake, d.at[1], pop * pulse]
             })
             .collect()
@@ -456,6 +458,22 @@ fn quiet_threshold(share: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// After days locked (an f32 clock stalls at 2^19 s), the right password
+    /// still brings every grain home within a second and a half.
+    #[test]
+    fn homing_finishes_after_a_long_lock() {
+        let mut storm = Storm::new([1920.0, 1080.0], [16.0, 16.0], ([0.0; 2], [1920.0, 1080.0]), 1, config::Storm::default());
+        storm.time = 2f64.powi(19) + 1000.0;
+        storm.next_gust = storm.time;
+        storm.correct();
+        let mut params = bytemuck::Zeroable::zeroed();
+        let steps = (0..1000).take_while(|_| {
+            storm.step(1.0 / 60.0, &mut params);
+            storm.homing_for().is_some_and(|t| t < HOMING_DONE)
+        });
+        assert!(steps.count() < 100);
+    }
 
     #[test]
     fn quiet_threshold_gives_the_share() {
