@@ -346,7 +346,7 @@ fn main() -> anyhow::Result<()> {
     // The password dots are an attractor too, on the primary output.
     let (row, width, radius) = storm.dots_row();
     let dots = attract::Dots::new(row, width, radius, canvas, named[primary].levels);
-    let mut live = gpu.checked(|| Ok(attract::install(&config.attractors, &named, primary, dots, &gpu, &mut sim)))?;
+    let mut layers = gpu.checked(|| Ok(attract::install(&config.attractors, &named, primary, dots, &gpu, &mut sim)))?;
     drop(images);
 
     // Lock (or open the preview overlays) and wait for every surface.
@@ -520,13 +520,8 @@ fn main() -> anyhow::Result<()> {
         }
 
         // Live attractors (clock, Game of Life, password dots): only what
-        // changed touches the targets.
-        let dots = storm.dots();
-        for widget in &mut live {
-            if let Some(t) = widget.update(&dots) {
-                sim.update_target(&gpu, &t);
-            }
-        }
+        // changed, and what is drawn over it, touches the targets.
+        layers.update(&storm.dots(), &gpu, &sim);
         let drew = draw_due(&mut app.screens, &qh, &gpu, &sim, 1.0, Duration::from_secs_f32(step));
         if drew {
             frames += 1;

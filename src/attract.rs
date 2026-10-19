@@ -223,8 +223,8 @@ fn finish(a: &config::Attractor, mut pixels: Vec<u8>, levels: [f32; 3]) -> Vec<u
 }
 
 /// Loads every configured attractor onto the simulation, and the password
-/// dots; returns the live ones, which the caller updates every frame. A
-/// broken attractor is logged and skipped, never fatal.
+/// dots; returns them all as `Layers`, which the caller updates every frame.
+/// A broken attractor is logged and skipped, never fatal.
 pub(crate) fn install(
     attractors: &[config::Attractor],
     screens: &[Screen],
@@ -232,16 +232,19 @@ pub(crate) fn install(
     dots: Dots,
     gpu: &crate::gpu::Gpu,
     sim: &mut crate::gpu::Sim,
-) -> Vec<Live> {
+) -> Layers {
     let mut targets = Vec::new();
-    let mut live = Vec::new();
+    let mut layers = Vec::new();
     for a in attractors {
         match load(a, screens, primary) {
-            Ok(Loaded::Still(t)) => targets.push((t, a.emerge, a.reach)),
+            Ok(Loaded::Still(t)) => {
+                layers.push(Layer { rect: t.rect(), rgba: t.rgba.clone(), live: None });
+                targets.push((t, a.emerge, a.reach));
+            }
             Ok(Loaded::Live(mut widget)) => match widget.update(&[]) {
                 Some(t) => {
+                    layers.push(Layer { rect: t.rect(), rgba: t.rgba.clone(), live: Some(widget) });
                     targets.push((t, a.emerge, a.reach));
-                    live.push(widget);
                 }
                 None => log::error!("{}: nothing to show", a.describe()),
             },
@@ -251,11 +254,72 @@ pub(crate) fn install(
     // Last, so the dots win wherever they overlap an attractor.
     let mut dots = Live::Dots(dots);
     if let Some(t) = dots.update(&[]) {
+        layers.push(Layer { rect: t.rect(), rgba: t.rgba.clone(), live: Some(dots) });
         targets.push((t, DOTS.emerge, DOTS.reach * screens[primary].place.size[1] as f32 / 1440.0));
-        live.push(dots);
     }
     sim.set_targets(gpu, &targets);
-    live
+    Layers(layers)
+}
+
+/// Every installed target in drawing order, and the live widget (if any)
+/// that re-renders it.
+pub(crate) struct Layers(Vec<Layer>);
+
+struct Layer {
+    /// origin x, y, size w, h (canvas px).
+    rect: [u32; 4],
+    /// Its pixels as last written.
+    rgba: Vec<u8>,
+    live: Option<Live>,
+}
+
+impl Layers {
+    /// Re-renders the live widgets (`dots` as for `Live::update`) and writes
+    /// what changed. A rewritten rectangle overwrites everything under it, so
+    /// every later target overlapping it is written again on top: later
+    /// targets win on overlap every frame, not just when installed.
+    pub(crate) fn update(&mut self, dots: &[[f32; 3]], gpu: &crate::gpu::Gpu, sim: &crate::gpu::Sim) {
+        let changed: Vec<bool> = self
+            .0
+            .iter_mut()
+            .map(|l| match l.live.as_mut().and_then(|w| w.update(dots)) {
+                Some(t) => {
+                    l.rgba = t.rgba;
+                    true
+                }
+                None => false,
+            })
+            .collect();
+        let rects: Vec<[u32; 4]> = self.0.iter().map(|l| l.rect).collect();
+        for (l, write) in self.0.iter().zip(rewrites(&rects, &changed)) {
+            if write {
+                let [x, y, w, h] = l.rect;
+                sim.update_target(gpu, &Target { origin: [x, y], size: [w, h], rgba: l.rgba.clone() });
+            }
+        }
+    }
+}
+
+/// Which layers (`rects` in drawing order) to write when `changed` ones
+/// re-rendered: those, and every later one overlapping a layer written
+/// before it.
+fn rewrites(rects: &[[u32; 4]], changed: &[bool]) -> Vec<bool> {
+    let overlap = |a: [u32; 4], b: [u32; 4]| {
+        a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]
+    };
+    let mut write = changed.to_vec();
+    for k in 0..rects.len() {
+        if !write[k] {
+            write[k] = (0..k).any(|j| write[j] && overlap(rects[j], rects[k]));
+        }
+    }
+    write
+}
+
+impl Target {
+    fn rect(&self) -> [u32; 4] {
+        [self.origin[0], self.origin[1], self.size[0], self.size[1]]
+    }
 }
 
 /// A loaded attractor: a still image, or a live one that re-renders when
@@ -734,6 +798,19 @@ impl Dots {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rewrites_later_overlapping_layers() {
+        // A full-screen board, a logo on it, a clock elsewhere, and dots
+        // overlapping only the logo.
+        let rects = [[0, 0, 100, 100], [40, 40, 20, 20], [200, 0, 50, 20], [50, 55, 30, 10]];
+        // The board changed: the logo goes back on top, and the dots on it.
+        assert_eq!(rewrites(&rects, &[true, false, false, false]), [true, true, false, true]);
+        // Only the dots changed: nothing is drawn over them.
+        assert_eq!(rewrites(&rects, &[false, false, false, true]), [false, false, false, true]);
+        // An earlier layer is never rewritten for a later one.
+        assert_eq!(rewrites(&rects, &[false, true, false, false]), [false, true, false, true]);
+    }
 
     fn life(cells: [usize; 2], alive: &[(usize, usize)]) -> Life {
         let mut l = Life {
