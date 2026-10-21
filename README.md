@@ -25,7 +25,7 @@ the live desktop.
   - a **Game of Life** that fills its output and starts a new game when the
     old one dies out or loops.
 - **Password dots made of sand.** Each typed character pulls a dot out of
-  the storm. A wrong password sets off an *eruption*: a shockwave of
+  the storm. A wrong password sets off an _eruption_: a shockwave of
   vortices that blows the attractors apart.
 - **A clean unlock.** On the right password, every grain returns to its own
   pixel. The final frame is the screenshot, exactly, so the handoff to the
@@ -64,6 +64,19 @@ security.pam.services.sandlock = {};
 ```
 
 `overlays.default` adds `pkgs.sandlock` instead.
+
+### Ubuntu (24.04 and newer)
+
+Download the `.deb` for your architecture from the
+[releases](https://github.com/Macs1324/sandlock/releases) and install it:
+
+```sh
+sudo apt install ./sandlock_*.deb
+```
+
+The package includes the `sandlock` PAM service. To build the `.deb`
+yourself, install the build dependencies listed under Cargo, then run
+`cargo install cargo-deb && cargo deb`.
 
 ### Cargo
 
@@ -151,17 +164,17 @@ Each attractor sets exactly one of `image`, `clock = {}` (options:
 `fill`). Attractors are drawn in order, so later ones win where they
 overlap.
 
-| key        | default        | what it does                                                  |
-| ---------- | -------------- | ------------------------------------------------------------- |
-| `output`   | largest output | connector name, e.g. `"DP-1"`                                 |
-| `position` | `[0.5, 0.35]`  | centre, as a fraction of the output                           |
-| `scale`    | 1              | screen px per image px (a clock is 100 px tall at 1)          |
-| `width`    | none           | width in screen px; overrides `scale`, keeps the aspect ratio |
-| `firmness` | 0.5            | 0 = loose, ripples with the storm .. 1 = firm                 |
-| `emerge`   | 4              | seconds until it has mostly formed                            |
-| `reach`    | 150            | how far (px) a target pixel looks for a matching grain        |
+| key        | default        | what it does                                                                                                |
+| ---------- | -------------- | ----------------------------------------------------------------------------------------------------------- |
+| `output`   | largest output | connector name, e.g. `"DP-1"`                                                                               |
+| `position` | `[0.5, 0.35]`  | centre, as a fraction of the output                                                                         |
+| `scale`    | 1              | screen px per image px (a clock is 100 px tall at 1)                                                        |
+| `width`    | none           | width in screen px; overrides `scale`, keeps the aspect ratio                                               |
+| `firmness` | 0.5            | 0 = loose, ripples with the storm .. 1 = firm                                                               |
+| `emerge`   | 4              | seconds until it has mostly formed                                                                          |
+| `reach`    | 150            | how far (px) a target pixel looks for a matching grain                                                      |
 | `tone`     | `"relative"`   | `"relative"` maps the image's brightness range onto the desktop's; `"absolute"` matches its literal colours |
-| `color`    | white          | a widget's colour, `"#rrggbb"`                                |
+| `color`    | white          | a widget's colour, `"#rrggbb"`                                                                              |
 
 ## Development
 

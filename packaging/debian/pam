@@ -1,0 +1,2 @@
+# PAM service for sandlock: unlock with the user's login password.
+@include common-auth

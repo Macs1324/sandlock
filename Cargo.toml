@@ -38,3 +38,22 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# `cargo deb` builds the Ubuntu package (24.04 and newer).
+[package.metadata.deb]
+maintainer = "Macs1324 <max.blank410@gmail.com>"
+copyright = "Macs1324"
+section = "x11"
+extended-description = """\
+When you lock, your desktop dissolves into a storm of its own pixels, carried \
+by a fluid simulation on the GPU. Needs a compositor with ext-session-lock-v1 \
+and wlr-screencopy-v1, such as niri, Hyprland or Sway."""
+# The Vulkan loader and libwayland-client are loaded with dlopen, so $auto
+# does not see them.
+depends = "$auto, libvulkan1, libwayland-client0"
+recommends = "mesa-vulkan-drivers | vulkan-icd"
+assets = [
+  ["target/release/sandlock", "usr/bin/", "755"],
+  ["packaging/debian/pam", "etc/pam.d/sandlock", "644"],
+  ["README.md", "usr/share/doc/sandlock/", "644"],
+]
